@@ -53,18 +53,29 @@ function Card(props: { children: React.ReactNode }) {
   );
 }
 
-export default function ResultClient(props: {
+type Props = {
   temp: number | null;
   feels: number | null;
   occasion: string | null;
   style: string | null;
-}) {
-  // page.tsx から渡される値（ここで decode する）
+};
+
+export default function ResultClient(props: Props) {
+  // page.tsx から渡される値
   const temp = props.temp;
   const feels = props.feels;
 
-  const occasion = props.occasion ? decodeURIComponent(props.occasion) : null;
-  const style = props.style ? decodeURIComponent(props.style) : null;
+  // decode を安全に（本番で malformed が出ても落ちない）
+  const safeDecode = (v: string) => {
+    try {
+      return decodeURIComponent(v);
+    } catch {
+      return v;
+    }
+  };
+
+  const occasion = props.occasion ? safeDecode(props.occasion) : null;
+  const style = props.style ? safeDecode(props.style) : null;
 
   // ===== Gemini提案の取得（AIが来たらAI、ダメならダミー） =====
   const [aiSuggestions, setAiSuggestions] = useState<CoordinateProposal[] | null>(null);
@@ -72,6 +83,8 @@ export default function ResultClient(props: {
   const [aiError, setAiError] = useState<string | null>(null);
 
   async function fetchAiSuggestions() {
+    if (loadingAi) return; // 連打防止（生成中は叩かない）
+
     try {
       setAiError(null);
       setLoadingAi(true);
@@ -82,26 +95,25 @@ export default function ResultClient(props: {
         body: JSON.stringify({
           temp: temp ?? null,
           feels: feels ?? null,
+          // 未選択でも投げる（API側は "未選択" を受け取れる設計にする）
           occasion: occasion ?? "未選択",
           style: style ?? "未選択",
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({} as any));
 
       if (!res.ok) {
-        // できればAPIの返したメッセージも見たいので status だけじゃなく data も使う
-        const msg =
-          data?.error || data?.message || `API error: ${res.status}`;
+        const msg = data?.error || data?.message || `API error: ${res.status}`;
         throw new Error(msg);
       }
 
       const suggestions = data?.suggestions;
-      if (!Array.isArray(suggestions) || suggestions.length < 3) {
+      if (!Array.isArray(suggestions) || suggestions.length < 1) {
         throw new Error("Invalid suggestions format");
       }
 
-      // points が3つない等でも落ちないように整形
+      // points が足りない等でも落ちないように整形
       const normalized: CoordinateProposal[] = suggestions.slice(0, 3).map((s: any, idx: number) => ({
         title: typeof s?.title === "string" ? s.title : `コーデ案${idx + 1}`,
         description: typeof s?.description === "string" ? s.description : "",
@@ -118,10 +130,8 @@ export default function ResultClient(props: {
   }
 
   useEffect(() => {
-    // occasion/style が取れているなら初回に生成
-    if (occasion && style) {
-      fetchAiSuggestions();
-    }
+    // ✅ 条件が未選択でも初回に必ず生成（本番で「何も起きない」を防ぐ）
+    fetchAiSuggestions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -156,17 +166,13 @@ export default function ResultClient(props: {
               {/* シチュエーション */}
               <div>
                 <span className="font-semibold text-[#7A7A7A]">シチュエーション: </span>
-                <span className="font-bold text-[#3D3D3D]">
-                  {occasion || "未選択"}
-                </span>
+                <span className="font-bold text-[#3D3D3D]">{occasion || "未選択"}</span>
               </div>
 
               {/* テイスト */}
               <div>
                 <span className="font-semibold text-[#7A7A7A]">テイスト: </span>
-                <span className="font-bold text-[#3D3D3D]">
-                  {style || "未選択"}
-                </span>
+                <span className="font-bold text-[#3D3D3D]">{style || "未選択"}</span>
               </div>
             </div>
           </Card>
@@ -181,24 +187,14 @@ export default function ResultClient(props: {
         {/* コーデ提案リスト */}
         <div className="mt-8 space-y-6">
           {loadingAi && (
-            <div className="text-center text-sm text-[#7A7A7A]">
-              提案を生成中…
-            </div>
-          )}
-
-          {aiError && (
-            <div className="text-center text-xs text-[#7A7A7A]">
-              生成に失敗したのでダミー提案を表示中（{aiError}）
-            </div>
+            <div className="text-center text-sm text-[#7A7A7A]">提案を生成中…</div>
           )}
 
           {(aiSuggestions ?? COORDINATE_PROPOSALS).map((proposal, index) => (
             <Card key={index}>
               <h2 className="text-xl font-extrabold">{proposal.title}</h2>
 
-              <p className="mt-3 leading-relaxed text-[#3D3D3D]">
-                {proposal.description}
-              </p>
+              <p className="mt-3 leading-relaxed text-[#3D3D3D]">{proposal.description}</p>
 
               <div className="mt-4">
                 <h3 className="text-sm font-semibold text-[#7A7A7A]">ポイント</h3>
@@ -216,13 +212,22 @@ export default function ResultClient(props: {
         </div>
 
         {/* フッター */}
-        <footer className="mt-10 flex justify-center">
+        <footer className="mt-10 flex justify-center gap-3">
           <button
             type="button"
             className="rounded-full border border-[#E8DED3] bg-white px-6 py-3 text-sm font-semibold text-[#3D3D3D] transition active:scale-[0.99]"
             onClick={() => window.history.back()}
           >
             戻る
+          </button>
+
+          <button
+            type="button"
+            disabled={loadingAi}
+            className="rounded-full bg-[#3D3D3D] px-6 py-3 text-sm font-semibold text-white transition active:scale-[0.99] disabled:opacity-50"
+            onClick={fetchAiSuggestions}
+          >
+            {loadingAi ? "生成中…" : "もう一度生成する"}
           </button>
         </footer>
       </div>

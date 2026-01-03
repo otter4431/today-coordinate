@@ -102,7 +102,7 @@ export async function POST(req: Request) {
   
   【各フィールドの書き方】
   - title：短く（12文字目安）。「結論の型」にする（例：黒ロングコート×ブーツ）
-  - description：2〜3文。1文目は必ず「今日はこれを着る」レベルで言い切り、2〜3文目で理由（温度・場面・テイスト適合）を書く
+  - description：2〜3文。1文目は必ず「今日着るならこれ！」と言い切り、2〜3文目で理由（温度・場面・テイスト適合）を書く
     ※ description の中には必ず outer / top / bottom(or onepiece) / shoes / bag を含める（文字として入っていればOK）
   - points：必ず3つ。内容は次の役割で固定する
     1つ目：主役アイテム（outer など）を具体化（色・丈・素材のどれかを含める）
@@ -134,12 +134,23 @@ export async function POST(req: Request) {
 
     if (!res.ok) {
       const errText = await res.text();
+    
+      // ★無料枠上限(429)のときはダミーで返してデモ継続
+      if (res.status === 429) {
+        return NextResponse.json({
+          ...fallbackSuggestions(),
+          notice: "混雑/上限のため一時的にダミー提案を表示中（少し待つと復帰します）",
+          gemini: { status: res.status, detail: errText },
+        }, { status: 200 });
+      }
+    
       return NextResponse.json(
         { error: 'Gemini API error', status: res.status, detail: errText },
-        { status: 500 }
+        { status: res.status }
       );
     }
-
+    
+    
     const json = await res.json();
     const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text;
 

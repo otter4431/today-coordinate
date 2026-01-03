@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+// app/result/page.tsx
 import ResultClient from "./result-client";
 
 export const dynamic = "force-dynamic";
@@ -11,19 +11,28 @@ function pickOne(v: string | string[] | undefined): string {
   return Array.isArray(v) ? v[0] ?? "" : v;
 }
 
-export default function ResultPage({ searchParams }: { searchParams: SearchParams }) {
-  // URLが situation/taste でも occasion/style でも拾えるようにしておく
-  const occasion = pickOne(searchParams.situation ?? searchParams.occasion);
-  const style = pickOne(searchParams.taste ?? searchParams.style);
+function toNumber(v: string | string[] | undefined): number | null {
+  const s = pickOne(v);
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
 
-  return (
-    <Suspense fallback={<div style={{ padding: 16 }}>Loading...</div>}>
-      <ResultClient
-        temp={null}
-        feels={null}
-        occasion={occasion || null}
-        style={style || null}
-      />
-    </Suspense>
-  );
+export default async function ResultPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  const sp = await searchParams;
+
+  const temp = toNumber(sp.temp);
+  const feels = toNumber(sp.feels);
+
+  const occasionRaw = pickOne(sp.occasion ?? sp.situation);
+  const styleRaw = pickOne(sp.style ?? sp.taste);
+
+  const occasion = occasionRaw.trim() ? occasionRaw : null;
+  const style = styleRaw.trim() ? styleRaw : null;
+
+  return <ResultClient temp={temp} feels={feels} occasion={occasion} style={style} />;
 }
